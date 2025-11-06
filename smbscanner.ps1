@@ -396,7 +396,8 @@ function Get-SMBVersion {
     param (
         [Parameter(Mandatory = $true, Position = 0)]
         [string[]] $Targets,
-        [switch] $SMBv1Only
+        [switch] $SMBv1Only,
+		[switch] $NoPortScan
     )
 
     # if subnet format like 10.0.2.0/24
@@ -413,53 +414,55 @@ function Get-SMBVersion {
     }
 
     Write-Host "Targets count:" $Targets.Count
+
+	if(!$NoPortScan){
+		$runspacePool = [runspacefactory]::CreateRunspacePool(1, 10)
+		$runspacePool.Open()
 	
-	$runspacePool = [runspacefactory]::CreateRunspacePool(1, 10)
-	$runspacePool.Open()
-
-	# Define the script block outside the loop for better efficiency
-	$scriptBlock = {
-		param ($computer)
-		$tcpClient = New-Object System.Net.Sockets.TcpClient
-		$asyncResult = $tcpClient.BeginConnect($computer, 445, $null, $null)
-		$wait = $asyncResult.AsyncWaitHandle.WaitOne(50)
-		if ($wait) {
-			try {
-				$tcpClient.EndConnect($asyncResult)
-				return $computer
-			} catch {}
+		# Define the script block outside the loop for better efficiency
+		$scriptBlock = {
+			param ($computer)
+			$tcpClient = New-Object System.Net.Sockets.TcpClient
+			$asyncResult = $tcpClient.BeginConnect($computer, 445, $null, $null)
+			$wait = $asyncResult.AsyncWaitHandle.WaitOne(50)
+			if ($wait) {
+				try {
+					$tcpClient.EndConnect($asyncResult)
+					return $computer
+				} catch {}
+			}
+			$tcpClient.Close()
+			return $null
 		}
-		$tcpClient.Close()
-		return $null
-	}
-
-	# Use a generic list for better performance when adding items
-	$runspaces = New-Object 'System.Collections.Generic.List[System.Object]'
-
-	foreach ($computer in $Targets) {
-		$powerShellInstance = [powershell]::Create().AddScript($scriptBlock).AddArgument($computer)
-		$powerShellInstance.RunspacePool = $runspacePool
-		$runspaces.Add([PSCustomObject]@{
-			Instance = $powerShellInstance
-			Status   = $powerShellInstance.BeginInvoke()
-		})
-	}
-
-	# Collect the results
-	$reachable_hosts = @()
-	foreach ($runspace in $runspaces) {
-		$result = $runspace.Instance.EndInvoke($runspace.Status)
-		if ($result) {
-			$reachable_hosts += $result
+	
+		# Use a generic list for better performance when adding items
+		$runspaces = New-Object 'System.Collections.Generic.List[System.Object]'
+	
+		foreach ($computer in $Targets) {
+			$powerShellInstance = [powershell]::Create().AddScript($scriptBlock).AddArgument($computer)
+			$powerShellInstance.RunspacePool = $runspacePool
+			$runspaces.Add([PSCustomObject]@{
+				Instance = $powerShellInstance
+				Status   = $powerShellInstance.BeginInvoke()
+			})
 		}
+	
+		# Collect the results
+		$reachable_hosts = @()
+		foreach ($runspace in $runspaces) {
+			$result = $runspace.Instance.EndInvoke($runspace.Status)
+			if ($result) {
+				$reachable_hosts += $result
+			}
+		}
+	
+		# Update the $Targets variable with the list of reachable hosts
+		$Targets = $reachable_hosts
+	
+		# Close and dispose of the runspace pool for good resource management
+		$runspacePool.Close()
+		$runspacePool.Dispose()
 	}
-
-	# Update the $Targets variable with the list of reachable hosts
-	$Targets = $reachable_hosts
-
-	# Close and dispose of the runspace pool for good resource management
-	$runspacePool.Close()
-	$runspacePool.Dispose()
 
     $results = @()
     $scanner = New-Object -TypeName PingCastle.Scanners.SmbScanner
