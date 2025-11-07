@@ -397,29 +397,26 @@ function Get-SMBVersion {
         [Parameter(Mandatory = $true, Position = 0)]
         [string[]] $Targets,
         [switch] $SMBv1Only,
-		[switch] $NoPortScan
+		[switch] $NoPortScan,
+		[String] $OutputFile
     )
 
-    # if subnet format like 10.0.2.0/24
     if ($Targets[0] -match "/") {
         $split = $Targets[0].Split("/")
         $ipBase = $split[0]
         $maskBits = [int]$split[1]
 
-        # Pass a single IP (not array) to Get-SubnetAddresses
         $ips = Get-SubnetAddresses -MaskBits $maskBits -IP $ipBase
 
-        # Expand to a range of IPs
         $Targets = Get-IPRange -Lower $ips[0] -Upper $ips[1]
     }
-
+	Write-Host ""
     Write-Host "Targets count:" $Targets.Count
 
 	if(!$NoPortScan){
 		$runspacePool = [runspacefactory]::CreateRunspacePool(1, 10)
 		$runspacePool.Open()
 	
-		# Define the script block outside the loop for better efficiency
 		$scriptBlock = {
 			param ($computer)
 			$tcpClient = New-Object System.Net.Sockets.TcpClient
@@ -435,7 +432,6 @@ function Get-SMBVersion {
 			return $null
 		}
 	
-		# Use a generic list for better performance when adding items
 		$runspaces = New-Object 'System.Collections.Generic.List[System.Object]'
 	
 		foreach ($computer in $Targets) {
@@ -447,7 +443,6 @@ function Get-SMBVersion {
 			})
 		}
 	
-		# Collect the results
 		$reachable_hosts = @()
 		foreach ($runspace in $runspaces) {
 			$result = $runspace.Instance.EndInvoke($runspace.Status)
@@ -456,10 +451,8 @@ function Get-SMBVersion {
 			}
 		}
 	
-		# Update the $Targets variable with the list of reachable hosts
 		$Targets = $reachable_hosts
 	
-		# Close and dispose of the runspace pool for good resource management
 		$runspacePool.Close()
 		$runspacePool.Dispose()
 	}
@@ -485,10 +478,32 @@ function Get-SMBVersion {
     }
 
     if ($SMBv1Only) {
-        return $results | Where-Object { $_.SMB1 -eq "Yes" } | Select-Object Computer, SMB1
+		$finalresults = $results | Where-Object { $_.SMB1 -eq "Yes" } | Select-Object Computer, SMB1
+        $finalresults
     } else {
-        return $results
+		$finalresults = $results
+        ($finalresults | Format-Table -AutoSize | Out-String).TrimEnd()
     }
+	
+	Write-Output ""
+	
+	if($finalresults){
+	
+		if(!$OutputFile){$OutputFile = "$pwd\SMBVersionScanner.txt"}
+		
+		$formattedResults = $finalresults | Format-Table | Out-String
+
+		$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+		[System.IO.File]::WriteAllText($OutputFile, $formattedResults, $utf8NoBom)
+		
+		if($OutputFile){Write-Output "Output saved to: $OutputFile"}
+  		else{Write-Output "Output saved to: $pwd\SMBVersionScanner.txt"}
+  	}
+	
+	if(!$SMBv1Only) {
+		Write-Output ""
+		Write-Output ""
+	}
 }
 
 function Get-SubnetAddresses {
