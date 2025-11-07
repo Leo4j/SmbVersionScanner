@@ -7,6 +7,9 @@ Check for SMBv1 and SMBv2 (SMBv3 is a dialect of SMBv2)
 ## # Example Usage
 
 ```
+iex(new-object net.webclient).downloadstring('https://raw.githubusercontent.com/Leo4j/SmbVersionScanner/refs/heads/master/smbscanner.ps1')
+```
+```
 Get-SMBVersion -Targets "DC01.ferrari.local"
 ```
 ```
